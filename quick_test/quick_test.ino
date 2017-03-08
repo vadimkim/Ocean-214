@@ -18,6 +18,9 @@
 #define POWER_DOWN      0x11
 #define SET_PROPERTY    0x12
 #define GET_INT_STATUS  0x14
+#define FM_TUNE_FREQ    0x20
+#define FM_SEEK_START   0x21
+#define FM_TUNE_STATUS  0x22
 
 // Command args
 #define POWER_UP_ARG1   0xC0
@@ -73,8 +76,11 @@ void loop() {
       error = 1;
     }
     power = 1;
-    
-    GetRevision();  
+
+    setProperties();
+    getRevision();
+    // fmTune100();
+    fmSeekStart();
   
   } else if (error == 1) {
     // Error, blink the led
@@ -170,7 +176,7 @@ void SiReset()
   delayMicroseconds(200);
 }
 
-void GetRevision() {
+void getRevision() {
     Serial.println("...Getting chip info");
     IRQflag=0; 
     Wire.beginTransmission(SI_ADDRESS);
@@ -201,21 +207,22 @@ void GetRevision() {
     Serial.println(); 
 }
 
-void ReadStatus() {
-  Serial.println("...Reading CTS");
+void getIntStatus() {
+  Serial.println("...Reading interrupt status");
   waitstat:
   Wire.beginTransmission(SI_ADDRESS);
   Wire.write(GET_INT_STATUS);  
   Wire.endTransmission();  
-  delayMicroseconds(2000);
+  delay(1000);
   Wire.requestFrom(SI_ADDRESS, 0x01);
   
   int status = Wire.read();    // receive a byte
+  Serial.println(status);
  
-  if (status != 0x80) {
+  if (status != 0x81) {
     goto waitstat;
   }
-  Serial.println("CTS is clear");
+  Serial.println("STC is set");
 }
 
 // The interrupt service routine
@@ -224,18 +231,67 @@ void SiISR()
     IRQflag=1;
 }
 
-    
+void setProperties() {
     // Set propertie  GPO_IEN (0x0001)
     // 2 bytes map is
     // 0 0 0 0 RSQREP RDSREP 0 STCREP | CTSIEN ERRIEN 0 0 RSQIEN RDSIEN 0 STCIEN
-    // 0x00 0x80
-//    Wire.beginTransmission(SI_ADDRESS);
-//    Wire.write(SET_PROPERTY);  
-//    Wire.write(0x00);  // ARG1 always = 0
-//    Wire.write(0x00);   // ARG2 
-//    Wire.write(0x01);   // ARG3
-//    Wire.write(0x00);   // ARG4
-//    Wire.write(0x80);   // ARG5
-//    Wire.endTransmission();
-    
+    // 0x00 0x81
+    Wire.beginTransmission(SI_ADDRESS);
+    Wire.write(SET_PROPERTY);  
+    Wire.write(0x00);  // ARG1 always = 0
+    Wire.write(0x00);   // ARG2 
+    Wire.write(0x01);   // ARG3
+    Wire.write(0x00);   // ARG4
+    Wire.write(0x81);   // ARG5 -- enable CTS and STC
+    Wire.endTransmission();    
+}
 
+void fmTune100() {
+    Serial.println("...Tune to 100Mhz");
+
+    Wire.beginTransmission(SI_ADDRESS);
+    Wire.write(FM_TUNE_FREQ);
+    Wire.write(0x00); // ARG1
+    Wire.write(0x27); // Hi byte
+    Wire.write(0x10); // Lo byte 
+    Wire.write(0x00); // Antenna cap automatic selection
+    Wire.endTransmission();
+
+ //   getIntStatus(); 
+     getTuneStatus();
+}
+
+void getTuneStatus() {
+    IRQflag=0; 
+    Wire.beginTransmission(SI_ADDRESS);
+    Wire.write(FM_TUNE_STATUS);
+    Wire.write(0x00); // ARG1
+    Wire.endTransmission();
+    while(!IRQflag);
+    
+    Wire.requestFrom(SI_ADDRESS, 0x06);
+    int x=0;
+    while(Wire.available())    // slave may send less than requested
+    {
+      status_rsp[x] = Wire.read();    // receive a byte
+      x++;
+    }
+      
+    Serial.print("Seek status is: ");
+    for (int i=0; i<6; i++) {
+      Serial.print(status_rsp[i]);
+      Serial.print(" ");
+    }
+    Serial.println();
+    delay(1000);
+}
+
+void fmSeekStart() {
+    Serial.println("...Start seeking.... ");
+    Wire.beginTransmission(SI_ADDRESS);
+    Wire.write(FM_SEEK_START);
+    Wire.write(0x0C); // ARG1
+    Wire.endTransmission();
+    //getIntStatus();
+}
+    
